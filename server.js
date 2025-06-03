@@ -6,9 +6,28 @@ const js2xmlparser = require('js2xmlparser');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const redis = require('redis');
 
 const app = express();
 const PORT = 3000;
+
+// Redis setup
+const redisClient = redis.createClient({
+    host: 'localhost',
+    port: 6379,
+    // password: 'your-password', // nếu có auth
+});
+
+redisClient.connect().catch(console.error);
+
+// Redis error handling
+redisClient.on('error', (err) => {
+    console.error('Redis Client Error:', err);
+});
+
+redisClient.on('connect', () => {
+    console.log('Connected to Redis');
+});
 
 // Đọc các template HTML
 const notFoundTemplate = fs.readFileSync(path.join(__dirname, 'public', '404.html'), 'utf8');
@@ -19,26 +38,160 @@ app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.text({ type: 'text/*', limit: '1mb' }));
 app.use(express.static('public'));
 
-// Lưu trữ tạm thời
-const storage = {};
+// Redis Storage Class
+class RedisStorage {
+    constructor(client) {
+        this.client = client;
+        this.defaultTTL = 600; // 10 phút = 600 giây
+    }
+    
+    async save(id, content) {
+        const data = {
+            content: content,
+            contentType: this.detectContentType(content),
+            createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + this.defaultTTL * 1000).toISOString(),
+            viewCount: 0
+        };
+        
+        // Lưu với expiration tự động sau 10 phút
+        await this.client.setEx(`paste:${id}`, this.defaultTTL, JSON.stringify(data));
+        return id;
+    }
+    
+    async get(id) {
+        try {
+            const data = await this.client.get(`paste:${id}`);
+            if (!data) return null;
+            
+            const parsed = JSON.parse(data);
+            
+            // Tăng view count và cập nhật lại với TTL hiện tại
+            parsed.viewCount++;
+            const remainingTTL = await this.client.ttl(`paste:${id}`);
+            
+            if (remainingTTL > 0) {
+                await this.client.setEx(`paste:${id}`, remainingTTL, JSON.stringify(parsed));
+            }
+            
+            return parsed;
+        } catch (error) {
+            console.error('Error getting paste:', error);
+            return null;
+        }
+    }
+    
+    async getTimeRemaining(id) {
+        const ttl = await this.client.ttl(`paste:${id}`);
+        return ttl > 0 ? ttl : 0;
+    }
+    
+    async exists(id) {
+        const exists = await this.client.exists(`paste:${id}`);
+        return exists === 1;
+    }
+    
+    detectContentType(content) {
+        try {
+            JSON.parse(content);
+            return 'json';
+        } catch {
+            // Kiểm tra XML
+            try {
+                xml2js.parseString(content, (err) => {
+                    if (!err) return 'xml';
+                });
+                if (content.trim().startsWith('<') && content.trim().endsWith('>')) {
+                    return 'xml';
+                }
+            } catch {}
+            
+            // Kiểm tra Base64
+            if (/^[A-Za-z0-9+/]*={0,2}$/.test(content) && content.length % 4 === 0 && content.length > 10) {
+                return 'base64';
+            }
+            
+            // Kiểm tra HTML
+            if (/<[^>]+>/.test(content)) {
+                return 'html';
+            }
+            
+            return 'text';
+        }
+    }
+}
 
-// API: Lưu text và trả về link
-app.post('/api/save', (req, res) => {
-    const text = req.body.text;
-    if (!text) return res.status(400).json({ error: 'Thiếu dữ liệu text' });
-    const id = uuidv4();
-    storage[id] = text;
-    res.json({ link: `/view/${id}`, id });
+// Initialize Redis storage
+const storage = new RedisStorage(redisClient);
+
+// API: Lưu text và trả về link (CẬP NHẬT)
+app.post('/api/save', async (req, res) => {
+    try {
+        const text = req.body.text;
+        if (!text) return res.status(400).json({ error: 'Thiếu dữ liệu text' });
+        
+        const id = uuidv4();
+        await storage.save(id, text);
+        
+        res.json({ 
+            link: `/view/${id}`, 
+            id,
+            expiresIn: 600, // 10 phút
+            expiresAt: new Date(Date.now() + 600000).toISOString(),
+            message: 'Paste sẽ tự động xóa sau 10 phút'
+        });
+    } catch (error) {
+        console.error('Save error:', error);
+        res.status(500).json({ error: 'Lỗi server khi lưu dữ liệu' });
+    }
 });
 
-// API: Lấy text theo id
-app.get('/api/get/:id', (req, res) => {
-    const id = req.params.id;
-    if (!storage[id]) return res.status(404).json({ error: 'Không tìm thấy' });
-    res.json({ text: storage[id] });
+// API: Lấy text theo id (CẬP NHẬT)
+app.get('/api/get/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const data = await storage.get(id);
+        
+        if (!data) {
+            return res.status(404).json({ error: 'Không tìm thấy hoặc đã hết hạn' });
+        }
+        
+        const timeRemaining = await storage.getTimeRemaining(id);
+        
+        res.json({ 
+            text: data.content,
+            contentType: data.contentType,
+            createdAt: data.createdAt,
+            viewCount: data.viewCount,
+            timeRemaining: timeRemaining,
+            remainingMinutes: Math.ceil(timeRemaining / 60)
+        });
+    } catch (error) {
+        console.error('Get error:', error);
+        res.status(500).json({ error: 'Lỗi server khi lấy dữ liệu' });
+    }
 });
 
-// API: Format JSON
+// API: Kiểm tra thời gian còn lại
+app.get('/api/ttl/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const timeRemaining = await storage.getTimeRemaining(id);
+        const exists = await storage.exists(id);
+        
+        res.json({
+            id,
+            exists,
+            timeRemaining,
+            remainingMinutes: Math.ceil(timeRemaining / 60),
+            expired: timeRemaining <= 0
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Format JSON (giữ nguyên)
 app.post('/api/format/json', (req, res) => {
     try {
         const obj = JSON.parse(req.body.text);
@@ -48,7 +201,7 @@ app.post('/api/format/json', (req, res) => {
     }
 });
 
-// API: Format XML
+// API: Format XML (giữ nguyên)
 app.post('/api/format/xml', (req, res) => {
     const text = req.body.text;
     xml2js.parseString(text, { 
@@ -75,7 +228,7 @@ app.post('/api/format/xml', (req, res) => {
     });
 });
 
-// API: XML -> JSON (SỬA LỖI)
+// API: XML -> JSON (giữ nguyên)
 app.post('/api/xml2json', (req, res) => {
     const text = req.body.text;
     if (!text || !text.trim()) {
@@ -104,7 +257,7 @@ app.post('/api/xml2json', (req, res) => {
     });
 });
 
-// API: JSON -> XML (SỬA LỖI)
+// API: JSON -> XML (giữ nguyên)
 app.post('/api/json2xml', (req, res) => {
     const text = req.body.text;
     if (!text || !text.trim()) {
@@ -114,11 +267,9 @@ app.post('/api/json2xml', (req, res) => {
     try {
         const obj = JSON.parse(text);
         
-        // Xử lý object phức tạp
         let rootKey = 'root';
         let dataToConvert = obj;
         
-        // Nếu JSON có một key duy nhất ở root level, sử dụng nó làm root
         const keys = Object.keys(obj);
         if (keys.length === 1 && typeof obj[keys[0]] === 'object') {
             rootKey = keys[0];
@@ -142,7 +293,7 @@ app.post('/api/json2xml', (req, res) => {
     }
 });
 
-// API: XML -> Base64
+// API: XML -> Base64 (giữ nguyên)
 app.post('/api/xml2base64', (req, res) => {
     const text = req.body.text;
     if (!text || !text.trim()) {
@@ -150,7 +301,6 @@ app.post('/api/xml2base64', (req, res) => {
     }
     
     try {
-        // Kiểm tra XML hợp lệ trước
         xml2js.parseString(text, (err) => {
             if (err) {
                 return res.status(400).json({ error: 'XML không hợp lệ: ' + err.message });
@@ -164,7 +314,7 @@ app.post('/api/xml2base64', (req, res) => {
     }
 });
 
-// API: Base64 -> XML
+// API: Base64 -> XML (giữ nguyên)
 app.post('/api/base642xml', (req, res) => {
     const base64 = req.body.text;
     if (!base64 || !base64.trim()) {
@@ -172,14 +322,12 @@ app.post('/api/base642xml', (req, res) => {
     }
     
     try {
-        // Kiểm tra Base64 hợp lệ
         if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
             throw new Error('Định dạng Base64 không hợp lệ');
         }
         
         const xml = Buffer.from(base64, 'base64').toString('utf-8');
         
-        // Kiểm tra XML sau khi decode
         xml2js.parseString(xml, (err) => {
             if (err) {
                 return res.status(400).json({ error: 'Nội dung decode không phải XML hợp lệ: ' + err.message });
@@ -192,47 +340,85 @@ app.post('/api/base642xml', (req, res) => {
     }
 });
 
-// View route (giữ nguyên)
-app.get('/view/:id', (req, res) => {
-    const id = req.params.id;
-    
-    if (!storage[id]) {
-        return res.status(404).send(notFoundTemplate);
-    }
-
-    const content = storage[id];
-    let contentType = 'text';
-    let displayContent = content;
-    
+// View route (CẬP NHẬT HOÀN TOÀN)
+app.get('/view/:id', async (req, res) => {
     try {
-        JSON.parse(content);
-        contentType = 'json';
-        displayContent = JSON.stringify(JSON.parse(content), null, 2);
-    } catch (e1) {
-        try {
-            require('xml2js').parseString(content, (err) => {
-                if (!err) {
-                    contentType = 'xml';
-                }
-            });
-        } catch (e2) {
-            if (/^[A-Za-z0-9+/]*={0,2}$/.test(content) && content.length % 4 === 0) {
-                contentType = 'base64';
-            }
+        const id = req.params.id;
+        const data = await storage.get(id);
+        
+        if (!data) {
+            return res.status(404).send(notFoundTemplate);
         }
+
+        const timeRemaining = await storage.getTimeRemaining(id);
+        const remainingMinutes = Math.ceil(timeRemaining / 60);
+        
+        const content = data.content;
+        const contentType = data.contentType;
+        let displayContent = content;
+        
+        // Format content theo type
+        if (contentType === 'json') {
+            try {
+                displayContent = JSON.stringify(JSON.parse(content), null, 2);
+            } catch {}
+        }
+
+        const escapedDisplayContent = displayContent.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escapedOriginalContent = content.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+
+        // Tạo HTML với thông tin expiration
+        let htmlResponse = viewContentTemplate
+            .replace(/\{\{CONTENT_TYPE\}\}/g, contentType.toUpperCase())
+            .replace(/\{\{DISPLAY_CONTENT\}\}/g, escapedDisplayContent)
+            .replace(/\{\{ORIGINAL_CONTENT\}\}/g, escapedOriginalContent);
+
+        // Thêm thông tin expiration vào HTML (nếu template hỗ trợ)
+        const expirationInfo = `
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin: 10px 0; border-radius: 5px;">
+            <strong>⏰ Thông tin hết hạn:</strong><br>
+            Thời gian còn lại: <span id="time-remaining">${remainingMinutes} phút (${timeRemaining}s)</span><br>
+            Lượt xem: ${data.viewCount}<br>
+            Tạo lúc: ${new Date(data.createdAt).toLocaleString('vi-VN')}
+        </div>
+        <script>
+            let timeLeft = ${timeRemaining};
+            const updateTimer = () => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    document.getElementById('time-remaining').innerHTML = '<span style="color: red;">ĐÃ HẾT HẠN</span>';
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    const minutes = Math.ceil(timeLeft / 60);
+                    document.getElementById('time-remaining').textContent = minutes + ' phút (' + timeLeft + 's)';
+                }
+            };
+            setInterval(updateTimer, 1000);
+        </script>`;
+        
+        // Chèn thông tin expiration vào HTML (sau tag body hoặc tìm vị trí phù hợp)
+        if (htmlResponse.includes('<body>')) {
+            htmlResponse = htmlResponse.replace('<body>', '<body>' + expirationInfo);
+        } else {
+            htmlResponse = expirationInfo + htmlResponse;
+        }
+
+        res.send(htmlResponse);
+    } catch (error) {
+        console.error('View error:', error);
+        res.status(500).send('Lỗi server khi hiển thị nội dung');
     }
+});
 
-    const escapedDisplayContent = displayContent.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const escapedOriginalContent = content.replace(/`/g, '\\`').replace(/\$/g, '\\$');
-
-    const htmlResponse = viewContentTemplate
-        .replace(/\{\{CONTENT_TYPE\}\}/g, contentType.toUpperCase())
-        .replace(/\{\{DISPLAY_CONTENT\}\}/g, escapedDisplayContent)
-        .replace(/\{\{ORIGINAL_CONTENT\}\}/g, escapedOriginalContent);
-
-    res.send(htmlResponse);
+// Graceful shutdown
+process.on('SIGINT', async () => {
+    console.log('Đang đóng kết nối Redis...');
+    await redisClient.quit();
+    process.exit(0);
 });
 
 app.listen(PORT, () => {
     console.log(`Server chạy tại http://localhost:${PORT}`);
+    console.log('Dữ liệu sẽ tự động xóa sau 10 phút');
+    console.log('Cần cài đặt Redis: npm install redis');
 });
