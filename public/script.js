@@ -1,23 +1,40 @@
-
-// Script tương thích với server API của bạn
 function showResult(html, type) {
     const resultDiv = document.getElementById('result');
+    
+    // Escape HTML để tránh XSS
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
     if (type === 'json') {
-        resultDiv.innerHTML = `<b>JSON:</b><pre>${html}</pre>`;
+        resultDiv.innerHTML = `<b>JSON được chuyển đổi:</b><pre>${escapeHtml(html)}</pre>`;
     } else if (type === 'xml') {
-        resultDiv.innerHTML = `<b>XML:</b><pre>${html}</pre>`;
+        resultDiv.innerHTML = `<b>XML được chuyển đổi:</b><pre>${escapeHtml(html)}</pre>`;
     } else if (type === 'base64') {
-        resultDiv.innerHTML = `<b>Base64:</b><pre>${html}</pre>`;
+        resultDiv.innerHTML = `<b>Base64 được chuyển đổi:</b><pre style="word-break: break-all;">${escapeHtml(html)}</pre>`;
     } else if (type === 'link') {
         resultDiv.innerHTML = html;
+    } else if (type === 'error') {
+        resultDiv.innerHTML = `<b style="color: #e53e3e;">❌ Lỗi:</b><pre style="color: #e53e3e;">${escapeHtml(html)}</pre>`;
     } else {
-        resultDiv.innerHTML = html;
+        resultDiv.innerHTML = `<pre>${escapeHtml(html)}</pre>`;
     }
+}
+
+function showLoading() {
+    const resultDiv = document.getElementById('result');
+    resultDiv.innerHTML = '<b>🔄 Đang xử lý...</b>';
 }
 
 async function saveText() {
     const text = document.getElementById('text').value;
-    if (!text) return showResult('Vui lòng nhập nội dung!');
+    if (!text || !text.trim()) {
+        return showResult('Vui lòng nhập nội dung!', 'error');
+    }
+    
+    showLoading();
     
     try {
         const res = await fetch('/api/save', {
@@ -25,21 +42,28 @@ async function saveText() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text })
         });
+        
         const data = await res.json();
-        if (data.link) {
-            showResult(`<b>Link chia sẻ:</b><br><a href="${data.link}" target="_blank">${window.location.origin}${data.link}</a>`, 'link');
+        
+        if (res.ok && data.link) {
+            showResult(`<b>✅ Link chia sẻ đã tạo:</b><br><a href="${data.link}" target="_blank" style="word-break: break-all;">${window.location.origin}${data.link}</a>`, 'link');
         } else {
-            showResult(data.error || 'Lỗi!');
+            showResult(data.error || 'Lỗi không xác định!', 'error');
         }
     } catch (error) {
-        showResult('Lỗi kết nối: ' + error.message);
+        showResult('Lỗi kết nối server: ' + error.message, 'error');
     }
 }
 
 async function formatText() {
     const text = document.getElementById('text').value;
     const format = document.getElementById('format').value;
-    if (!text) return showResult('Vui lòng nhập nội dung!');
+    
+    if (!text || !text.trim()) {
+        return showResult('Vui lòng nhập nội dung cần format!', 'error');
+    }
+    
+    showLoading();
     
     try {
         const res = await fetch(`/api/format/${format}`, {
@@ -47,20 +71,26 @@ async function formatText() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text })
         });
+        
         const data = await res.json();
-        if (data.formatted) {
+        
+        if (res.ok && data.formatted) {
             showResult(data.formatted, format);
         } else {
-            showResult(data.error || 'Lỗi!');
+            showResult(data.error || 'Lỗi format!', 'error');
         }
     } catch (error) {
-        showResult('Lỗi kết nối: ' + error.message);
+        showResult('Lỗi kết nối server: ' + error.message, 'error');
     }
 }
 
 async function xml2json() {
     const text = document.getElementById('text').value;
-    if (!text) return showResult('Vui lòng nhập XML!');
+    if (!text || !text.trim()) {
+        return showResult('Vui lòng nhập nội dung XML!', 'error');
+    }
+    
+    showLoading();
     
     try {
         const res = await fetch('/api/xml2json', {
@@ -68,20 +98,26 @@ async function xml2json() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text })
         });
+        
         const data = await res.json();
-        if (data.json) {
+        
+        if (res.ok && data.json) {
             showResult(data.json, 'json');
         } else {
-            showResult(data.error || 'Lỗi!');
+            showResult(data.error || 'Lỗi chuyển đổi XML sang JSON!', 'error');
         }
     } catch (error) {
-        showResult('Lỗi kết nối: ' + error.message);
+        showResult('Lỗi kết nối server: ' + error.message, 'error');
     }
 }
 
 async function json2xml() {
     const text = document.getElementById('text').value;
-    if (!text) return showResult('Vui lòng nhập JSON!');
+    if (!text || !text.trim()) {
+        return showResult('Vui lòng nhập nội dung JSON!', 'error');
+    }
+    
+    showLoading();
     
     try {
         const res = await fetch('/api/json2xml', {
@@ -89,20 +125,26 @@ async function json2xml() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text })
         });
+        
         const data = await res.json();
-        if (data.xml) {
+        
+        if (res.ok && data.xml) {
             showResult(data.xml, 'xml');
         } else {
-            showResult(data.error || 'Lỗi!');
+            showResult(data.error || 'Lỗi chuyển đổi JSON sang XML!', 'error');
         }
     } catch (error) {
-        showResult('Lỗi kết nối: ' + error.message);
+        showResult('Lỗi kết nối server: ' + error.message, 'error');
     }
 }
 
 async function xml2base64() {
     const text = document.getElementById('text').value;
-    if (!text) return showResult('Vui lòng nhập XML!');
+    if (!text || !text.trim()) {
+        return showResult('Vui lòng nhập nội dung XML!', 'error');
+    }
+    
+    showLoading();
     
     try {
         const res = await fetch('/api/xml2base64', {
@@ -110,20 +152,26 @@ async function xml2base64() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text })
         });
+        
         const data = await res.json();
-        if (data.base64) {
+        
+        if (res.ok && data.base64) {
             showResult(data.base64, 'base64');
         } else {
-            showResult(data.error || 'Lỗi!');
+            showResult(data.error || 'Lỗi chuyển đổi XML sang Base64!', 'error');
         }
     } catch (error) {
-        showResult('Lỗi kết nối: ' + error.message);
+        showResult('Lỗi kết nối server: ' + error.message, 'error');
     }
 }
 
 async function base642xml() {
     const text = document.getElementById('text').value;
-    if (!text) return showResult('Vui lòng nhập Base64!');
+    if (!text || !text.trim()) {
+        return showResult('Vui lòng nhập nội dung Base64!', 'error');
+    }
+    
+    showLoading();
     
     try {
         const res = await fetch('/api/base642xml', {
@@ -131,13 +179,15 @@ async function base642xml() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text })
         });
+        
         const data = await res.json();
-        if (data.xml) {
+        
+        if (res.ok && data.xml) {
             showResult(data.xml, 'xml');
         } else {
-            showResult(data.error || 'Lỗi!');
+            showResult(data.error || 'Lỗi chuyển đổi Base64 sang XML!', 'error');
         }
     } catch (error) {
-        showResult('Lỗi kết nối: ' + error.message);
+        showResult('Lỗi kết nối server: ' + error.message, 'error');
     }
 }
