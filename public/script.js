@@ -1,5 +1,6 @@
 function showResult(html, type) {
     const resultDiv = document.getElementById('result');
+    const titleDiv = document.getElementById('result-title');
     
     // Escape HTML để tránh XSS
     function escapeHtml(text) {
@@ -9,16 +10,22 @@ function showResult(html, type) {
     }
     
     if (type === 'json') {
-        resultDiv.innerHTML = `<b>JSON được chuyển đổi:</b><pre>${escapeHtml(html)}</pre>`;
+        titleDiv.innerHTML = 'JSON được chuyển đổi:';
+        resultDiv.innerHTML = `<pre>${escapeHtml(html)}</pre>`;
     } else if (type === 'xml') {
-        resultDiv.innerHTML = `<b>XML được chuyển đổi:</b><pre>${escapeHtml(html)}</pre>`;
+        titleDiv.innerHTML = 'XML được chuyển đổi:';
+        resultDiv.innerHTML = `<pre>${escapeHtml(html)}</pre>`;
     } else if (type === 'base64') {
-        resultDiv.innerHTML = `<b>Base64 được chuyển đổi:</b><pre style="word-break: break-all;">${escapeHtml(html)}</pre>`;
+        titleDiv.innerHTML = 'Base64 được chuyển đổi:';
+        resultDiv.innerHTML = `<pre style="word-break: break-all;">${escapeHtml(html)}</pre>`;
     } else if (type === 'link') {
+        titleDiv.innerHTML = '';
         resultDiv.innerHTML = html;
     } else if (type === 'error') {
-        resultDiv.innerHTML = `<b style="color: #e53e3e;">❌ Lỗi:</b><pre style="color: #e53e3e;">${escapeHtml(html)}</pre>`;
+        titleDiv.innerHTML = '<span style="color: #e53e3e;">❌ Lỗi:</span>';
+        resultDiv.innerHTML = `<pre style="color: #e53e3e;">${escapeHtml(html)}</pre>`;
     } else {
+        titleDiv.innerHTML = '';
         resultDiv.innerHTML = `<pre>${escapeHtml(html)}</pre>`;
     }
 }
