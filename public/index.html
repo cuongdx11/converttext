@@ -276,10 +276,37 @@
             box-shadow: 0 8px 32px rgba(250, 112, 154, 0.4);
         }
         
+        .btn-copy {
+            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+            color: white;
+            box-shadow: 0 4px 16px rgba(72, 187, 120, 0.3);
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            padding: 8px 12px;
+            font-size: 12px;
+            min-width: auto;
+            z-index: 2;
+        }
+        
+        .btn-copy:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(72, 187, 120, 0.4);
+        }
+        
+        .btn-copy.copied {
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+        }
+        
         .result-section {
             display: flex;
             flex-direction: column;
             height: 100%;
+            position: relative;
+        }
+        
+        .result-wrapper {
+            position: relative;
         }
         
         .result-box {
@@ -393,6 +420,29 @@
             66% { transform: translateY(10px) rotate(240deg); }
         }
         
+        .copy-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(72, 187, 120, 0.3);
+            font-weight: 600;
+            font-size: 14px;
+            transform: translateX(400px);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .copy-notification.show {
+            transform: translateX(0);
+        }
+        
         @media (max-width: 768px) {
             .container {
                 margin: 10px;
@@ -418,6 +468,17 @@
             h1 {
                 font-size: 24px;
             }
+            
+            .btn-copy {
+                position: static;
+                margin-top: 12px;
+                width: 100%;
+            }
+            
+            .result-wrapper {
+                display: flex;
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -426,6 +487,11 @@
         <div class="floating-shape"></div>
         <div class="floating-shape"></div>
         <div class="floating-shape"></div>
+    </div>
+    
+    <div id="copyNotification" class="copy-notification">
+        <i class="fa-solid fa-check"></i>
+        Đã sao chép vào clipboard!
     </div>
     
     <div class="container">
@@ -493,8 +559,14 @@
                     <i class="fa-solid fa-file-code"></i>
                     Kết quả
                 </h2>
-                <div id="result" class="result-box">
-                    <pre>Kết quả sẽ hiển thị ở đây sau khi bạn thực hiện các thao tác chuyển đổi...</pre>
+                <div class="result-wrapper">
+                    <button class="btn-copy" onclick="copyResult()" title="Sao chép kết quả">
+                        <i class="fa-solid fa-copy"></i>
+                        Copy
+                    </button>
+                    <div id="result" class="result-box">
+                        <pre>Kết quả sẽ hiển thị ở đây sau khi bạn thực hiện các thao tác chuyển đổi...</pre>
+                    </div>
                 </div>
             </div>
         </div>
