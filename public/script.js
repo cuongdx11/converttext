@@ -196,49 +196,50 @@ function copyResult() {
     const resultBox = document.getElementById('result');
     const copyBtn = document.querySelector('.btn-copy');
     const notification = document.getElementById('copyNotification');
-    
+
     // Get text content from result box
-    const textToCopy = resultBox.textContent || resultBox.innerText;
-    
-    // Copy to clipboard
-    navigator.clipboard.writeText(textToCopy).then(() => {
-        // Show success feedback
-        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
-        copyBtn.classList.add('copied');
-        
-        // Show notification
-        notification.classList.add('show');
-        
-        // Reset button after 2 seconds
-        setTimeout(() => {
-            copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Copy';
-            copyBtn.classList.remove('copied');
-            notification.classList.remove('show');
-        }, 2000);
-    }).catch(err => {
-        console.error('Failed to copy text: ', err);
-        // Fallback for older browsers
-        try {
-            const textArea = document.createElement('textarea');
-            textArea.value = textToCopy;
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textArea);
-            
-            // Show success feedback
-            copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
-            copyBtn.classList.add('copied');
-            notification.classList.add('show');
-            
-            setTimeout(() => {
-                copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Copy';
-                copyBtn.classList.remove('copied');
-                notification.classList.remove('show');
-            }, 2000);
-        } catch (fallbackErr) {
-            console.error('Fallback copy failed: ', fallbackErr);
+    const textToCopy = resultBox?.textContent || resultBox?.innerText || '';
+
+    // Check if clipboard API is supported
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            showCopySuccess(copyBtn, notification);
+        }).catch(err => {
+            console.error('Clipboard copy failed: ', err);
+            fallbackCopy(textToCopy, copyBtn, notification);
+        });
+    } else {
+        // Use fallback
+        fallbackCopy(textToCopy, copyBtn, notification);
+    }
+}
+
+function fallbackCopy(textToCopy, copyBtn, notification) {
+    try {
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) {
+            showCopySuccess(copyBtn, notification);
+        } else {
+            console.error('Fallback copy was not successful.');
         }
-    });
+    } catch (err) {
+        console.error('Fallback copy failed: ', err);
+    }
+}
+
+function showCopySuccess(copyBtn, notification) {
+    copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+    copyBtn.classList.add('copied');
+    notification.classList.add('show');
+    setTimeout(() => {
+        copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Copy';
+        copyBtn.classList.remove('copied');
+        notification.classList.remove('show');
+    }, 2000);
 }
